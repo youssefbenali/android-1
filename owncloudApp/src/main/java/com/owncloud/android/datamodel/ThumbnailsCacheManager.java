@@ -1,4 +1,4 @@
-/**
+/*
  * ownCloud Android client application
  *
  * @author Tobias Kaminsky
@@ -27,6 +27,7 @@ import android.graphics.Bitmap;
 import android.graphics.Bitmap.CompressFormat;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.media.ThumbnailUtils;
@@ -35,7 +36,6 @@ import android.os.AsyncTask;
 import android.view.MenuItem;
 import android.widget.ImageView;
 
-import androidx.core.content.ContextCompat;
 import com.owncloud.android.MainApp;
 import com.owncloud.android.R;
 import com.owncloud.android.authentication.AccountUtils;
@@ -53,14 +53,14 @@ import com.owncloud.android.utils.BitmapUtils;
 import java.io.File;
 import java.io.InputStream;
 import java.lang.ref.WeakReference;
+import java.net.FileNameMap;
 import java.net.URL;
+import java.net.URLConnection;
 
 /**
  * Manager for concurrent access to thumbnails cache.
  */
 public class ThumbnailsCacheManager {
-
-    private static final String TAG = ThumbnailsCacheManager.class.getSimpleName();
 
     private static final String CACHE_FOLDER = "thumbnailCache";
 
@@ -93,7 +93,7 @@ public class ThumbnailsCacheManager {
                         final String cachePath =
                                 MainApp.Companion.getAppContext().getExternalCacheDir().getPath() +
                                         File.separator + CACHE_FOLDER;
-                        Log_OC.d(TAG, "create dir: " + cachePath);
+                        Log_OC.d("create dir: " + cachePath);
                         final File diskCacheDir = new File(cachePath);
                         mThumbnailCache = new DiskLruImageCache(
                                 diskCacheDir,
@@ -102,7 +102,7 @@ public class ThumbnailsCacheManager {
                                 mCompressQuality
                         );
                     } catch (Exception e) {
-                        Log_OC.d(TAG, "Thumbnail cache could not be opened ", e);
+                        Log_OC.d("Thumbnail cache could not be opened ", e);
                         mThumbnailCache = null;
                     }
                 }
@@ -113,7 +113,7 @@ public class ThumbnailsCacheManager {
         }
     }
 
-    public static void addBitmapToCache(String key, Bitmap bitmap) {
+    private static void addBitmapToCache(String key, Bitmap bitmap) {
         synchronized (mThumbnailsDiskCacheLock) {
             if (mThumbnailCache != null) {
                 mThumbnailCache.put(key, bitmap);
@@ -121,7 +121,7 @@ public class ThumbnailsCacheManager {
         }
     }
 
-    public static void removeBitmapFromCache(String key) {
+    private static void removeBitmapFromCache(String key) {
         synchronized (mThumbnailsDiskCacheLock) {
             if (mThumbnailCache != null) {
                 mThumbnailCache.removeKey(key);
@@ -136,7 +136,7 @@ public class ThumbnailsCacheManager {
                 try {
                     mThumbnailsDiskCacheLock.wait();
                 } catch (InterruptedException e) {
-                    Log_OC.e(TAG, "Wait in mThumbnailsDiskCacheLock was interrupted", e);
+                    Log_OC.e("Wait in mThumbnailsDiskCacheLock was interrupted", e);
                 }
             }
             if (mThumbnailCache != null) {
@@ -186,14 +186,26 @@ public class ThumbnailsCacheManager {
 
                 if (mFile instanceof OCFile) {
                     thumbnail = doOCFileInBackground();
+
+                    if (((OCFile) mFile).isVideo() && thumbnail != null) {
+                        thumbnail = addVideoOverlay(thumbnail);
+                    }
                 } else if (mFile instanceof File) {
                     thumbnail = doFileInBackground();
+
+                    String url = ((File) mFile).getAbsolutePath();
+                    FileNameMap fileNameMap = URLConnection.getFileNameMap();
+                    String mMimeType = fileNameMap.getContentTypeFor("file://" + url);
+
+                    if (mMimeType != null && mMimeType.startsWith("video/") && thumbnail != null) {
+                        thumbnail = addVideoOverlay(thumbnail);
+                    }
                     //} else {  do nothing
                 }
 
             } catch (Throwable t) {
                 // the app should never break due to a problem with thumbnails
-                Log_OC.e(TAG, "Generation of thumbnail for " + mFile + " failed", t);
+                Log_OC.e("Generation of thumbnail for " + mFile + " failed", t);
                 if (t instanceof OutOfMemoryError) {
                     System.gc();
                 }
@@ -222,6 +234,7 @@ public class ThumbnailsCacheManager {
 
         /**
          * Add thumbnail to cache
+         *
          * @param imageKey: thumb key
          * @param bitmap:   image for extracting thumbnail
          * @param path:     image path
@@ -243,6 +256,7 @@ public class ThumbnailsCacheManager {
 
         /**
          * Converts size of file icon from dp to pixel
+         *
          * @return int
          */
         private int getThumbnailDimension() {
@@ -286,12 +300,12 @@ public class ThumbnailsCacheManager {
                     OwnCloudVersion serverOCVersion = AccountUtils.getServerVersion(mAccount);
                     if (mClient != null && serverOCVersion != null) {
                         if (serverOCVersion.supportsRemoteThumbnails()) {
-                            GetMethod get = null;
+                            GetMethod get;
                             try {
                                 String uri = mClient.getBaseUri() + "" +
                                         "/index.php/apps/files/api/v1/thumbnail/" +
                                         px + "/" + px + Uri.encode(file.getRemotePath(), "/");
-                                Log_OC.d("Thumbnail", "URI: " + uri);
+                                Log_OC.d("Thumbnail URI: " + uri);
                                 get = new GetMethod(new URL(uri));
                                 int status = mClient.executeHttpMethod(get);
                                 if (status == HttpConstants.HTTP_OK) {
@@ -315,7 +329,7 @@ public class ThumbnailsCacheManager {
                                 e.printStackTrace();
                             }
                         } else {
-                            Log_OC.d(TAG, "Server too old");
+                            Log_OC.d("Server too old");
                         }
                     }
                 }
@@ -331,7 +345,7 @@ public class ThumbnailsCacheManager {
                     Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(resultBitmap);
 
-            c.drawColor(ContextCompat.getColor(MainApp.Companion.getAppContext(), R.color.background_color));
+            c.drawColor(MainApp.Companion.getAppContext().getResources().getColor(R.color.background_color));
             c.drawBitmap(bitmap, 0, 0, null);
 
             return resultBitmap;
@@ -364,13 +378,13 @@ public class ThumbnailsCacheManager {
 
     /**
      * Show the avatar corresponding to the received account in an {@link ImageView} ir {@link MenuItem}.
-     *
+     * <p>
      * The avatar is loaded if available in the cache and bound to the received UI element. The avatar is not
      * fetched from the server if not available, unless the parameter 'fetchFromServer' is set to 'true'.
-     *
+     * <p>
      * If there is no avatar stored and cannot be fetched, a colored icon is generated with the first
      * letter of the account username.
-     *
+     * <p>
      * If this is not possible either, a predefined user icon is bound instead.
      */
     public static class GetAvatarTask extends AsyncTask<Object, Void, Drawable> {
@@ -386,12 +400,12 @@ public class ThumbnailsCacheManager {
         /**
          * Builds an instance to show the avatar corresponding to the received account in an {@link ImageView}.
          *
-         * @param imageView         The {@link ImageView} to bind the avatar to.
-         * @param account           OC account which avatar will be shown.
-         * @param displayRadius     The radius of the circle where the avatar will be clipped into.
-         * @param fetchFromServer   When 'true', if there is no avatar stored in the cache, it's fetched from
-         *                          the server. When 'false', server is not accessed, the fallback avatar is
-         *                          generated instead. USE WITH CARE, probably to be removed in the future.
+         * @param imageView       The {@link ImageView} to bind the avatar to.
+         * @param account         OC account which avatar will be shown.
+         * @param displayRadius   The radius of the circle where the avatar will be clipped into.
+         * @param fetchFromServer When 'true', if there is no avatar stored in the cache, it's fetched from
+         *                        the server. When 'false', server is not accessed, the fallback avatar is
+         *                        generated instead. USE WITH CARE, probably to be removed in the future.
          */
         public GetAvatarTask(ImageView imageView, Account account, float displayRadius, boolean fetchFromServer) {
             if (account == null) {
@@ -407,12 +421,11 @@ public class ThumbnailsCacheManager {
         /**
          * Builds an instance to show the avatar corresponding to the received account in an {@link MenuItem}.
          *
-         * @param menuItem         The {@ImageView} to bind the avatar to.
-         * @param account           OC account which avatar will be shown.
-         * @param displayRadius     The radius of the circle where the avatar will be clipped into.
-         * @param fetchFromServer   When 'true', if there is no avatar stored in the cache, it's fetched from
-         *                          the server. When 'false', server is not accessed, the fallback avatar is
-         *                          generated instead. USE WITH CARE, probably to be removed in the future.
+         * @param account         OC account which avatar will be shown.
+         * @param displayRadius   The radius of the circle where the avatar will be clipped into.
+         * @param fetchFromServer When 'true', if there is no avatar stored in the cache, it's fetched from
+         *                        the server. When 'false', server is not accessed, the fallback avatar is
+         *                        generated instead. USE WITH CARE, probably to be removed in the future.
          */
         public GetAvatarTask(MenuItem menuItem, Account account, float displayRadius, boolean fetchFromServer) {
             if (account == null) {
@@ -440,7 +453,7 @@ public class ThumbnailsCacheManager {
 
             } catch (Throwable t) {
                 // the app should never break due to a problem with avatars
-                Log_OC.e(TAG, "Generation of avatar for " + mUsername + " failed", t);
+                Log_OC.e("Generation of avatar for " + mUsername + " failed", t);
                 if (t instanceof OutOfMemoryError) {
                     System.gc();
                 }
@@ -470,9 +483,7 @@ public class ThumbnailsCacheManager {
                         menuItem.setIcon(avatar);
                     } else {
                         // really needed
-                        menuItem.setIcon(
-                                R.drawable.ic_account_circle
-                        );
+                        menuItem.setIcon(R.drawable.ic_account_circle);
                     }
                 }
             }
@@ -480,6 +491,7 @@ public class ThumbnailsCacheManager {
 
         /**
          * Converts size of file icon from dp to pixel
+         *
          * @return int
          */
         private int getAvatarDimension() {
@@ -512,11 +524,11 @@ public class ThumbnailsCacheManager {
                     OwnCloudVersion serverOCVersion = AccountUtils.getServerVersion(mAccount);
                     if (mClient != null && serverOCVersion != null) {
                         if (serverOCVersion.supportsRemoteThumbnails()) {
-                            GetMethod get = null;
+                            GetMethod get;
                             try {
                                 String uri = mClient.getBaseUri() + "" +
                                         "/index.php/avatar/" + AccountUtils.getUsernameOfAccount(mUsername) + "/" + px;
-                                Log_OC.d("Avatar", "URI: " + uri);
+                                Log_OC.d("Avatar URI: " + uri);
                                 get = new GetMethod(new URL(uri));
                                 int status = mClient.executeHttpMethod(get);
                                 if (status == HttpConstants.HTTP_OK) {
@@ -532,10 +544,10 @@ public class ThumbnailsCacheManager {
                                     mClient.exhaustResponse(get.getResponseBodyAsStream());
                                 }
                             } catch (Exception e) {
-                                Log_OC.e(TAG, "Error downloading avatar", e);
+                                Log_OC.e("Error downloading avatar", e);
                             }
                         } else {
-                            Log_OC.d(TAG, "Server too old");
+                            Log_OC.d("Server too old");
                         }
                     }
                 }
@@ -552,7 +564,7 @@ public class ThumbnailsCacheManager {
 
                     } catch (Exception e) {
                         // nothing to do, return null to apply default icon
-                        Log_OC.e(TAG, "Error calculating RGB value for active account icon.", e);
+                        Log_OC.e("Error calculating RGB value for active account icon.", e);
                     }
                 }
             }
@@ -587,33 +599,7 @@ public class ThumbnailsCacheManager {
             if (bitmapData == null || bitmapData != file) {
                 // Cancel previous task
                 bitmapWorkerTask.cancel(true);
-                Log_OC.v(TAG, "Cancelled generation of thumbnail for a reused imageView");
-            } else {
-                // The same work is already in progress
-                return false;
-            }
-        }
-        // No task associated with the ImageView, or an existing task was cancelled
-        return true;
-    }
-
-    public static boolean cancelPotentialAvatarWork(Object file, ImageView imageView) {
-        return cancelPotentialAvatarWork(file, getAvatarWorkerTask(imageView));
-    }
-
-    public static boolean cancelPotentialAvatarWork(Object file, MenuItem menuItem) {
-        return cancelPotentialAvatarWork(file, getAvatarWorkerTask(menuItem));
-    }
-
-    public static boolean cancelPotentialAvatarWork(Object file, final GetAvatarTask avatarWorkerTask) {
-
-        if (avatarWorkerTask != null) {
-            final Object usernameData = avatarWorkerTask.mUsername;
-            // If usernameData is not yet set or it differs from the new data
-            if (usernameData == null || usernameData != file) {
-                // Cancel previous task
-                avatarWorkerTask.cancel(true);
-                Log_OC.v(TAG, "Cancelled generation of avatar for a reused imageView");
+                Log_OC.v("Cancelled generation of thumbnail for a reused imageView");
             } else {
                 // The same work is already in progress
                 return false;
@@ -634,38 +620,55 @@ public class ThumbnailsCacheManager {
         return null;
     }
 
-    private static GetAvatarTask getAvatarWorkerTask(ImageView imageView) {
-        if (imageView != null) {
-            return getAvatarWorkerTask(imageView.getDrawable());
-        }
-        return null;
-    }
+    public static Bitmap addVideoOverlay(Bitmap thumbnail) {
+        Bitmap playButton = BitmapFactory.decodeResource(MainApp.Companion.getAppContext().getResources(),
+                R.drawable.view_play);
 
-    private static GetAvatarTask getAvatarWorkerTask(MenuItem menuItem) {
-        if (menuItem != null) {
-            return getAvatarWorkerTask(menuItem.getIcon());
-        }
-        return null;
-    }
+        Bitmap resizedPlayButton = Bitmap.createScaledBitmap(playButton,
+                (int) (thumbnail.getWidth() * 0.3),
+                (int) (thumbnail.getHeight() * 0.3), true);
 
-    private static GetAvatarTask getAvatarWorkerTask(Drawable drawable) {
-        if (drawable instanceof AsyncAvatarDrawable) {
-            final AsyncAvatarDrawable asyncDrawable = (AsyncAvatarDrawable) drawable;
-            return asyncDrawable.getAvatarWorkerTask();
-        }
-        return null;
+        Bitmap resultBitmap = Bitmap.createBitmap(thumbnail.getWidth(),
+                thumbnail.getHeight(),
+                Bitmap.Config.ARGB_8888);
+
+        Canvas c = new Canvas(resultBitmap);
+
+        // compute visual center of play button, according to resized image
+        int x1 = resizedPlayButton.getWidth();
+        int y1 = resizedPlayButton.getHeight() / 2;
+        int x2 = 0;
+        int y2 = resizedPlayButton.getWidth();
+        int x3 = 0;
+        int y3 = 0;
+
+        double ym = (((Math.pow(x3, 2) - Math.pow(x1, 2) + Math.pow(y3, 2) - Math.pow(y1, 2)) *
+                (x2 - x1)) - (Math.pow(x2, 2) - Math.pow(x1, 2) + Math.pow(y2, 2) -
+                Math.pow(y1, 2)) * (x3 - x1)) / (2 * (((y3 - y1) * (x2 - x1)) -
+                ((y2 - y1) * (x3 - x1))));
+        double xm = ((Math.pow(x2, 2) - Math.pow(x1, 2)) + (Math.pow(y2, 2) - Math.pow(y1, 2)) -
+                (2 * ym * (y2 - y1))) / (2 * (x2 - x1));
+
+        // offset to top left
+        double ox = -xm;
+
+        c.drawBitmap(thumbnail, 0, 0, null);
+
+        Paint p = new Paint();
+        p.setAlpha(230);
+
+        c.drawBitmap(resizedPlayButton, (float) ((thumbnail.getWidth() / 2) + ox),
+                (float) ((thumbnail.getHeight() / 2) - ym), p);
+
+        return resultBitmap;
     }
 
     public static class AsyncThumbnailDrawable extends BitmapDrawable {
         private final WeakReference<ThumbnailGenerationTask> bitmapWorkerTaskReference;
 
-        public AsyncThumbnailDrawable(
-                Resources res, Bitmap bitmap, ThumbnailGenerationTask bitmapWorkerTask
-        ) {
-
+        public AsyncThumbnailDrawable(Resources res, Bitmap bitmap, ThumbnailGenerationTask bitmapWorkerTask) {
             super(res, bitmap);
-            bitmapWorkerTaskReference =
-                    new WeakReference<ThumbnailGenerationTask>(bitmapWorkerTask);
+            bitmapWorkerTaskReference = new WeakReference<>(bitmapWorkerTask);
         }
 
         public ThumbnailGenerationTask getBitmapWorkerTask() {
@@ -673,20 +676,4 @@ public class ThumbnailsCacheManager {
         }
     }
 
-    public static class AsyncAvatarDrawable extends BitmapDrawable {
-        private final WeakReference<GetAvatarTask> avatarWorkerTaskReference;
-
-        public AsyncAvatarDrawable(
-                Resources res, Bitmap bitmap, GetAvatarTask avatarWorkerTask
-        ) {
-
-            super(res, bitmap);
-            avatarWorkerTaskReference =
-                    new WeakReference<GetAvatarTask>(avatarWorkerTask);
-        }
-
-        public GetAvatarTask getAvatarWorkerTask() {
-            return avatarWorkerTaskReference.get();
-        }
-    }
 }
