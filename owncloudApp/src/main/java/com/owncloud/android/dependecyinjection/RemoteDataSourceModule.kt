@@ -54,6 +54,7 @@ val remoteDataSourceModule = module {
     single<ShareService> { OCShareService(get()) }
     single<ShareeService> { OCShareeService(get()) }
     single<UserService> { OCUserService(get()) }
+    single<ServerService> { OCServerService(get()) }
 
     factory<RemoteCapabilitiesDataSource> {
         OCRemoteCapabilitiesDataSource(
@@ -78,4 +79,5 @@ val remoteDataSourceModule = module {
             get()
         )
     }
+    factory<RemoteServerDataSource> { OCRemoteServerDataSource(get()) }
 }
